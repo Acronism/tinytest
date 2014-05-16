@@ -1,0 +1,8 @@
+.DS_Store
+*.o
+*.d
+
+bin/
+lib/
+include/
+obj/

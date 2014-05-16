@@ -1,0 +1,12 @@
+lib tinytest : src/tinytest.cpp :
+	<link>static
+	<toolset>darwin:<cxxflags>"-std=c++11 -fcolor-diagnostics"
+	<toolset>gcc:<cxxflags>"-std=c++11"
+: :
+	<include>src
+	<toolset>darwin:<cxxflags>"-std=c++11"
+	<toolset>gcc:<cxxflags>"-std=c++11"
+;
+
+install install-lib : tinytest : <location>lib ;
+install install-include : [ glob src/*.h ] : <location>include/tinytest ;
