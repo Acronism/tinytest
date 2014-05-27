@@ -4,7 +4,7 @@
 
 TEST_SUITE("Container Tests") {
 
-	TEST("bounds testing") {
+	TEST("bounds") {
 		std::vector<int> v = {0, 1, 2};
 
 		for (size_t i = 0; i < 3; ++i) {

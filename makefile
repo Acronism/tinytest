@@ -6,13 +6,13 @@ endif
 
 all: lib/libtinytest.a
 
-lib/libtinytest.a: src/tinytest.h src/tinytest.cpp
+lib/libtinytest.a: src/tinytest.h src/utility.h src/tinytest.cpp
 	@mkdir -p obj
 	@mkdir -p include/tinytest
 	@mkdir -p lib
 	$(CXX) $(CXXFLAGS) -c src/tinytest.cpp -o obj/tinytest.o
 	ar rcs $@ obj/tinytest.o
-	cp src/tinytest.h include/tinytest/tinytest.h
+	cp src/*.h include/tinytest/
 
 clean:
 	rm -rf include

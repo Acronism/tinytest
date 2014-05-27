@@ -7,8 +7,90 @@
 #include <Windows.h>
 #endif
 
+namespace TestDetail {
+
+TestLogger gTestLogger;
+
+// everything printed inside of a logging session is guaranteed to be contiguous
+void TestLogger::startSession() {
+	std::lock_guard<std::mutex> lk(_queueMutex);
+	if (!_hasActive) {
+		_hasActive = true;
+		_activeSession = std::this_thread::get_id();
+	}
+	// TODO: don't append sessions on older sessions?
+}
+
+void TestLogger::stopSession() {
+	std::lock_guard<std::mutex> lk(_queueMutex);
+	if (_hasActive && _activeSession == std::this_thread::get_id()) {
+		// cycle to a non-empty queue, if there is no non-empty queue, there is no active session
+		_hasActive = false;
+		for (auto&& qPair : _writeQueue) {
+			if (!qPair.second.empty()) {
+				_hasActive = true;
+				_activeSession = qPair.first;
+				break;
+			}
+		}
+		if (_hasActive) {
+			while (!_writeQueue[_activeSession].empty()) {
+				_doWrite(_writeQueue[_activeSession].front());
+				_writeQueue[_activeSession].pop_front();
+			}
+		}
+	}
+}
+
+void TestLogger::flush() {
+	std::lock(_queueMutex, _stdoutMutex);
+	std::unique_lock<std::mutex> lk1(_queueMutex, std::adopt_lock);
+	std::unique_lock<std::mutex> lk2(_stdoutMutex, std::adopt_lock);
+
+	for (auto&& qPair : _writeQueue) {
+		while (!qPair.second.empty()) {
+			_doWrite(qPair.second.front());
+			qPair.second.pop_front();
+		}
+	}
+}
+
+void TestLogger::_doWrite(const std::string& str) {
+	auto it = str.begin();
+	while (it != str.end()) {
+		auto start = std::find(it, str.end(), '[');
+		auto end = std::find(start, str.end(), ']');
+
+		if (it != start) {
+			std::cout.write(str.c_str() + std::distance(str.begin(), it), std::distance(it, start));
+		}
+
+		if (start == str.end()) {
+			break;
+		}
+		if (end != str.end()) {
+			std::string tag(start, end + 1);
+			if (tag == "[RED]") {
+				_SetTestingOutputColor(kTestingOutputColorRed);
+			} else if (tag == "[GREEN]") {
+				_SetTestingOutputColor(kTestingOutputColorGreen);
+			} else if (tag == "[BLUE]") {
+				_SetTestingOutputColor(kTestingOutputColorBlue);
+			} else if (tag == "[DEFAULT]") {
+				_SetTestingOutputColor(kTestingOutputColorDefault);
+			} else {
+				// tag not matched, print it as normal text
+				std::cout.write(str.c_str() + std::distance(str.begin(), start), std::distance(start, end));
+			}
+		}
+
+		it = end + 1;
+	}
+	_SetTestingOutputColor(kTestingOutputColorDefault);
+}
+
+void TestLogger::_SetTestingOutputColor(TestingOutputColor color) {
 #ifdef _WIN32
-void SetTestingOutputColor(TestingOutputColor color) {
 	HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
 
 	static bool shouldFetchDefault = true;
@@ -36,9 +118,7 @@ void SetTestingOutputColor(TestingOutputColor color) {
 			SetConsoleTextAttribute(hConsole, defaultAttribute);
 			break;
 	}
-}
 #else
-void SetTestingOutputColor(TestingOutputColor color) {
 	switch (color) {
 		case kTestingOutputColorGreen:
 			printf("\033[22;32m");
@@ -53,21 +133,7 @@ void SetTestingOutputColor(TestingOutputColor color) {
 			printf("\033[22;0m");
 			break;
 	}
-}
 #endif
-
-int main(int argc, char* argv[]) {
-	int ret = 0;
-
-	if (argc >= 2) {
-		for (int i = 1; i < argc; ++i) {
-			ret += RunTests(argv[i]);
-		}
-	} else {
-		ret = RunTests();
-	}
-
-	return ret;
 }
 
 CheckFailureMessage::CheckFailureMessage(const char* format, int line, const char* extra) : format(format), line(line), extra(extra) {
@@ -96,12 +162,10 @@ TestResults& TestResults::operator+=(const TestResults& right) {
 }
 
 bool TestSuite::run(TestResults* results) {
-	SetTestingOutputColor(kTestingOutputColorDefault);
+	TestLoggerSession session;
 
-	printf("===========================================================\n");
-	SetTestingOutputColor(kTestingOutputColorBlue);
-	printf("Running test suite %s...\n", name.c_str());
-	SetTestingOutputColor(kTestingOutputColorDefault);
+	gTestLogger.sessionWrite("===========================================================\n"
+	                       "[BLUE]Running test suite %s...\n", name.c_str());
 	TestResults r;
 	bool suiteFailed = false;
 	bool abortAll = false;
@@ -109,16 +173,14 @@ bool TestSuite::run(TestResults* results) {
 	// setup
 	try {
 		if (setup) {
-			printf("Setting up...\n");
+			gTestLogger.sessionWrite("Setting up...\n");
 			setup(&r);
 		}
 	} catch (const TestException) {
 		suiteFailed = true;
 #ifndef DEBUG_EXCEPTIONS
 	} catch (...) {
-		SetTestingOutputColor(kTestingOutputColorRed);
-		printf("Unhandled exception thrown during setup for '%s' suite.\n", name.c_str());
-		SetTestingOutputColor(kTestingOutputColorDefault);
+		gTestLogger.sessionWrite("[RED]Unhandled exception thrown during setup for '%s' suite.\n", name.c_str());
 		suiteFailed = true;
 #endif
 	}
@@ -127,7 +189,7 @@ bool TestSuite::run(TestResults* results) {
 	if (!suiteFailed) {
 		for (auto it = tests.begin(); it != tests.end(); ++it) {
 			try { // try each test
-				printf("Testing %s...\n", it->first.c_str());
+				gTestLogger.sessionWrite("Testing %s...\n", it->first.c_str());
 				it->second(&r);
 			} catch (const TestException& e) {
 				if (e == TestExceptionAbortSuite) {
@@ -142,9 +204,7 @@ bool TestSuite::run(TestResults* results) {
 #ifndef DEBUG_EXCEPTIONS
 			} catch (...) {
 				// TODO: it'd probably be safe to just abort the test
-				SetTestingOutputColor(kTestingOutputColorRed);
-				printf("Unhandled exception thrown during '%s' test. Aborting suite.\n", it->first.c_str());
-				SetTestingOutputColor(kTestingOutputColorDefault);
+				gTestLogger.sessionWrite("[RED]Unhandled exception thrown during '%s' test. Aborting suite.\n", it->first.c_str());
 				++r.abortedSuites;
 				suiteFailed = true;
 				break;
@@ -158,23 +218,17 @@ bool TestSuite::run(TestResults* results) {
 	try {
 #endif
 		if (teardown) {
-			printf("Tearing down...\n");
+			gTestLogger.sessionWrite("Tearing down...\n");
 			teardown(&r);
 		}
 		if (!r.failedChecks) {
-			SetTestingOutputColor(kTestingOutputColorGreen);
-			printf("All %u checks passed!\n", r.totalChecks);
-			SetTestingOutputColor(kTestingOutputColorDefault);
+			gTestLogger.sessionWrite("[GREEN]All %u checks passed!\n", r.totalChecks);
 		} else {
-			SetTestingOutputColor(kTestingOutputColorRed);
-			printf("%u of %u checks failed!\n", r.failedChecks, r.totalChecks);
-			SetTestingOutputColor(kTestingOutputColorDefault);
+			gTestLogger.sessionWrite("[RED]%u of %u checks failed!\n", r.failedChecks, r.totalChecks);
 		}
 #ifndef DEBUG_EXCEPTIONS
 	} catch (...) {
-		SetTestingOutputColor(kTestingOutputColorRed);
-		printf("Unhandled exception thrown during teardown for '%s' suite. Aborting ALL suites.\n", name.c_str());
-		SetTestingOutputColor(kTestingOutputColorDefault);
+		gTestLogger.sessionWrite("[RED]Unhandled exception thrown during teardown for '%s' suite. Aborting ALL suites.\n", name.c_str());
 		abortAll = true;
 	}
 #endif
@@ -189,7 +243,6 @@ bool TestSuite::run(TestResults* results) {
 }
 
 int RunTests(const char* suite) {
-	SetTestingOutputColor(kTestingOutputColorDefault);
 
 	std::map<std::string, TestResults> results;
 	TestResults overall;
@@ -199,9 +252,7 @@ int RunTests(const char* suite) {
 	if (suite) {
 		auto it = GetTestSuiteMap()->find(suite);
 		if (it == GetTestSuiteMap()->end()) {
-			SetTestingOutputColor(kTestingOutputColorRed);
-			printf("Test suite \"%s\" not found.\n", suite);
-			SetTestingOutputColor(kTestingOutputColorDefault);
+			gTestLogger.write("[RED]Test suite \"%s\" not found.\n", suite);
 		} else {
 			TestResults r;
 			try {
@@ -215,65 +266,83 @@ int RunTests(const char* suite) {
 			overall += r;
 		}
 	} else {
+		// would be much easier with boost asio, but that requires a library
+		std::vector<std::thread> threads;
+		std::mutex mapMutex;
+		const size_t concurrency = std::thread::hardware_concurrency();
+
 		for (auto it = GetTestSuiteMap()->begin(); it != GetTestSuiteMap()->end(); ++it) {
-			TestResults r;
-			try {
-				if (it->second.run(&r)) {
-					++completedSuites;
+			if (threads.size() == concurrency) {
+				// concurrency capped, wait for a thread to finish
+				while (threads.size() == concurrency) {
+					for (auto it = threads.begin(); it != threads.end();) {
+						if (it->joinable()) {
+							it->join();
+							it = threads.erase(it);
+						} else {
+							++it;
+						}
+					}
+					std::this_thread::sleep_for(std::chrono::milliseconds(100));
 				}
-			} catch (TestException) {
-				break;
 			}
-			results[it->first] = r;
-			overall += r;
+			threads.emplace_back([&, it]{
+				TestResults r;
+				try {
+					if (it->second.run(&r)) {
+						++completedSuites;
+					}
+				} catch (TestException) {}
+				{
+					std::lock_guard<std::mutex> lk(mapMutex);
+					results[it->first] = r;
+				}
+				overall += r;
+			});
 		}
+
+		while (!threads.empty()) {
+			if (threads.back().joinable()) {
+				threads.back().join();
+			}
+			threads.pop_back();
+		}
+		gTestLogger.flush();
 	}
 
 	size_t incompletedSuites = (suite ? 1 : GetTestSuiteMap()->size()) - completedSuites;
 
-	printf("========================= SUMMARY =========================\n");
+	gTestLogger.write("========================= SUMMARY =========================\n");
 	if (incompletedSuites) {
-		SetTestingOutputColor(kTestingOutputColorRed);
-		printf("Warning: One or more suites were not completed. Results may be incomplete.\n");
-		SetTestingOutputColor(kTestingOutputColorDefault);
+		gTestLogger.write("[RED]Warning: One or more suites were not completed. Results may be incomplete.\n");
 	}
-	printf("Total checks performed: %d\n", overall.totalChecks);
+	gTestLogger.write("Total checks performed: %d\n", overall.totalChecks);
 	if (!overall.failedChecks) {
-		SetTestingOutputColor(kTestingOutputColorGreen);
-		printf("Total checks failed: %d\n", overall.failedChecks);
-		SetTestingOutputColor(kTestingOutputColorDefault);
+		gTestLogger.write("[GREEN]Total checks failed: %d\n", overall.failedChecks);
 	} else {
-		SetTestingOutputColor(kTestingOutputColorRed);
-		printf("Total checks failed: %d\n", overall.failedChecks);
-		SetTestingOutputColor(kTestingOutputColorDefault);
+		gTestLogger.write("[RED]Total checks failed: %d\n", overall.failedChecks);
 	}
 	if (overall.abortedTests) {
-		SetTestingOutputColor(kTestingOutputColorRed);
-		printf("Aborted tests: %d\n", overall.abortedTests);
-		SetTestingOutputColor(kTestingOutputColorDefault);
+		gTestLogger.write("[RED]Aborted tests: %d\n", overall.abortedTests);
 	}
 	if (overall.abortedSuites) {
-		SetTestingOutputColor(kTestingOutputColorRed);
-		printf("Aborted suites: %d\n", overall.abortedSuites);
-		SetTestingOutputColor(kTestingOutputColorDefault);
+		gTestLogger.write("[RED]Aborted suites: %d\n", overall.abortedSuites);
 	}
 	for (auto it = results.begin(); it != results.end(); ++it) {
 		if (it->second.failedChecks == 0) {
 			continue;
 		}
-		printf("-----------------------------------------------------------\n");
-		SetTestingOutputColor(kTestingOutputColorRed);
-		printf("%s: %d %s\n", it->first.c_str(), it->second.failedChecks, it->second.failedChecks == 1 ? "failure" : "failures");
+		gTestLogger.write("-----------------------------------------------------------\n");
+		gTestLogger.write("[RED]%s: %d %s\n", it->first.c_str(), it->second.failedChecks, it->second.failedChecks == 1 ? "failure" : "failures");
 		for (const CheckFailureMessage& m : it->second.failureMessages) {
 			if (m.extra) {
-				printf(m.format, m.line, m.extra);
+				gTestLogger.write(m.format, m.line, m.extra);
 			} else {
-				printf(m.format, m.line);
+				gTestLogger.write(m.format, m.line);
 			}
 		}
-		SetTestingOutputColor(kTestingOutputColorDefault);
 	}
-	printf("===========================================================\n");
+	gTestLogger.write("===========================================================\n");
 
 	return incompletedSuites + overall.failedChecks + overall.abortedTests + overall.abortedSuites;
 }
@@ -283,4 +352,20 @@ const char* TestSuiteNamer::Name;
 TestSuiteMap* GetTestSuiteMap() {
 	static TestSuiteMap* suites = new TestSuiteMap();
 	return suites;
+}
+
+} // TestDetail
+
+int main(int argc, char* argv[]) {
+	int ret = 0;
+
+	if (argc >= 2) {
+		for (int i = 1; i < argc; ++i) {
+			ret += TestDetail::RunTests(argv[i]);
+		}
+	} else {
+		ret = TestDetail::RunTests();
+	}
+
+	return ret;
 }
