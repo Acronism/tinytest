@@ -57,12 +57,6 @@ void SetTestingOutputColor(TestingOutputColor color) {
 #endif
 
 int main(int argc, char* argv[]) {
-#ifdef _WIN32
-	WORD wsaVersion = MAKEWORD(2, 2);
-	WSADATA wsaData;
-	WSAStartup(wsaVersion, &wsaData);
-#endif
-
 	int ret = 0;
 
 	if (argc >= 2) {
@@ -72,10 +66,6 @@ int main(int argc, char* argv[]) {
 	} else {
 		ret = RunTests();
 	}
-
-#ifdef _WIN32
-	WSACleanup();
-#endif
 
 	return ret;
 }
