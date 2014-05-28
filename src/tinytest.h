@@ -7,6 +7,8 @@
 #include <functional>
 #include <list>
 
+namespace TestDetail {
+
 // CRAZY BEHIND-THE-SCENES SETUP STUFF
 
 struct CheckFailureMessage {
@@ -88,65 +90,67 @@ void SetTestingOutputColor(TestingOutputColor color);
 
 int RunTests(const char* suite = nullptr);
 
+} // namespace TestDetail
+
 // MACROS USED TO CREATE TESTS
 
 #define CONCATENATE_INNER(a, b) a ## b
 #define CONCATENATE(a, b) CONCATENATE_INNER(a, b)
 
 #define TEST_SUITE(name) \
-	static TestSuiteNamer CONCATENATE(gTestSuiteNamer, __COUNTER__) = name; \
-	static TestSuiteCreator CONCATENATE(gTestSuiteCreator, __COUNTER__) = [](TestSuite* suite)
+	static TestDetail::TestSuiteNamer CONCATENATE(gTestSuiteNamer, __COUNTER__) = name; \
+	static TestDetail::TestSuiteCreator CONCATENATE(gTestSuiteCreator, __COUNTER__) = [](TestDetail::TestSuite* suite)
 
 #define SETUP() \
-	suite->setup = [](TestResults* results)
+	suite->setup = [](TestDetail::TestResults* _results)
 
 #define TEARDOWN() \
-	suite->teardown = [](TestResults* results)
+	suite->teardown = [](TestDetail::TestResults* _results)
 
 #define TEST(name) \
-	suite->tests[name] = [](TestResults* results)
+	suite->tests[name] = [](TestDetail::TestResults* _results)
 
 #define ABORT_SUITE(...) \
-	const char* format = "Abort Suite called in " __FILE__ " on line %d:\n    "; \
-	SetTestingOutputColor(kTestingOutputColorRed); \
-	printf(format, __LINE__); \
+	const char* _format = "Abort Suite called in " __FILE__ " on line %d:\n    "; \
+	TestDetail::SetTestingOutputColor(TestDetail::kTestingOutputColorRed); \
+	printf(_format, __LINE__); \
 	printf(__VA_ARGS__); \
 	printf("\n"); \
-	SetTestingOutputColor(kTestingOutputColorDefault); \
-	results->failureMessages.push_back(CheckFailureMessage(format, __LINE__)); \
-	throw TestExceptionAbortSuite;
+	TestDetail::SetTestingOutputColor(TestDetail::kTestingOutputColorDefault); \
+	_results->failureMessages.push_back(TestDetail::CheckFailureMessage(_format, __LINE__)); \
+	throw TestDetail::TestExceptionAbortSuite;
 
 #define ABORT_TEST() \
-	const char* format = "Abort Test called in " __FILE__ " on line %d!\n"; \
-	SetTestingOutputColor(kTestingOutputColorRed); \
-	printf(format, __LINE__); \
-	SetTestingOutputColor(kTestingOutputColorDefault); \
-	results->failureMessages.push_back(CheckFailureMessage(format, __LINE__)); \
-	throw TestExceptionAbortTest;
+	const char* _format = "Abort Test called in " __FILE__ " on line %d!\n"; \
+	TestDetail::SetTestingOutputColor(TestDetail::kTestingOutputColorRed); \
+	printf(_format, __LINE__); \
+	TestDetail::SetTestingOutputColor(TestDetail::kTestingOutputColorDefault); \
+	_results->failureMessages.push_back(TestDetail::CheckFailureMessage(_format, __LINE__)); \
+	throw TestDetail::TestExceptionAbortTest;
 
 // exception != failed check
 #define CHECK(condition) \
-	++results->totalChecks; \
+	++_results->totalChecks; \
 	if (!(condition)) { \
-		++results->failedChecks; \
-		const char* format = "Failed check in " __FILE__ " on line %d!\n"; \
-		SetTestingOutputColor(kTestingOutputColorRed); \
-		printf(format, __LINE__); \
-		SetTestingOutputColor(kTestingOutputColorDefault); \
-		results->failureMessages.push_back(CheckFailureMessage(format, __LINE__)); \
+		++_results->failedChecks; \
+		const char* _format = "Failed check in " __FILE__ " on line %d!\n"; \
+		TestDetail::SetTestingOutputColor(TestDetail::kTestingOutputColorRed); \
+		printf(_format, __LINE__); \
+		TestDetail::SetTestingOutputColor(TestDetail::kTestingOutputColorDefault); \
+		_results->failureMessages.push_back(TestDetail::CheckFailureMessage(_format, __LINE__)); \
 	}
 
 // exception != failed check
 #define CHECK_ESSENTIAL(condition) \
-	++results->totalChecks; \
+	++_results->totalChecks; \
 	if (!(condition)) { \
-		++results->failedChecks; \
-		const char* format = "Failed essential check in " __FILE__ " on line %d! Aborting test.\n"; \
-		SetTestingOutputColor(kTestingOutputColorRed); \
-		printf(format, __LINE__); \
-		SetTestingOutputColor(kTestingOutputColorDefault); \
-		results->failureMessages.push_back(CheckFailureMessage(format, __LINE__)); \
-		throw TestExceptionAbortTest; \
+		++_results->failedChecks; \
+		const char* _format = "Failed essential check in " __FILE__ " on line %d! Aborting test.\n"; \
+		TestDetail::SetTestingOutputColor(TestDetail::kTestingOutputColorRed); \
+		printf(_format, __LINE__); \
+		TestDetail::SetTestingOutputColor(TestDetail::kTestingOutputColorDefault); \
+		_results->failureMessages.push_back(TestDetail::CheckFailureMessage(_format, __LINE__)); \
+		throw TestDetail::TestExceptionAbortTest; \
 	}
 
 // these check macros don't evaluate true or false, they only check for the presence or absence of an exception
