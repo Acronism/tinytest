@@ -276,11 +276,6 @@ TestSuiteMap* GetTestSuiteMap() {
 } // namespace TestDetail
 
 int main(int argc, char* argv[]) {
-#ifdef _WIN32
-	WORD wsaVersion = MAKEWORD(2, 2);
-	WSADATA wsaData;
-	WSAStartup(wsaVersion, &wsaData);
-#endif
 
 	int ret = 0;
 
@@ -291,10 +286,6 @@ int main(int argc, char* argv[]) {
 	} else {
 		ret = TestDetail::RunTests();
 	}
-
-#ifdef _WIN32
-	WSACleanup();
-#endif
 
 	return ret;
 }
