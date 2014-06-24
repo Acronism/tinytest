@@ -1,8 +1,7 @@
 #include <tinytest/tinytest.h>
 
-static int i = 0;
-
 TEST_SUITE("setup/teardown") {
+	static int i = 0;
 
 	SETUP() {
 		i = 10;
