@@ -7,6 +7,8 @@
 #include <Windows.h>
 #endif
 
+namespace TestDetail {
+
 #ifdef _WIN32
 void SetTestingOutputColor(TestingOutputColor color) {
 	HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -55,30 +57,6 @@ void SetTestingOutputColor(TestingOutputColor color) {
 	}
 }
 #endif
-
-int main(int argc, char* argv[]) {
-#ifdef _WIN32
-	WORD wsaVersion = MAKEWORD(2, 2);
-	WSADATA wsaData;
-	WSAStartup(wsaVersion, &wsaData);
-#endif
-
-	int ret = 0;
-
-	if (argc >= 2) {
-		for (int i = 1; i < argc; ++i) {
-			ret += RunTests(argv[i]);
-		}
-	} else {
-		ret = RunTests();
-	}
-
-#ifdef _WIN32
-	WSACleanup();
-#endif
-
-	return ret;
-}
 
 CheckFailureMessage::CheckFailureMessage(const char* format, int line, const char* extra) : format(format), line(line), extra(extra) {
 }
@@ -293,4 +271,30 @@ const char* TestSuiteNamer::Name;
 TestSuiteMap* GetTestSuiteMap() {
 	static TestSuiteMap* suites = new TestSuiteMap();
 	return suites;
+}
+
+} // namespace TestDetail
+
+int main(int argc, char* argv[]) {
+#ifdef _WIN32
+	WORD wsaVersion = MAKEWORD(2, 2);
+	WSADATA wsaData;
+	WSAStartup(wsaVersion, &wsaData);
+#endif
+
+	int ret = 0;
+
+	if (argc >= 2) {
+		for (int i = 1; i < argc; ++i) {
+			ret += TestDetail::RunTests(argv[i]);
+		}
+	} else {
+		ret = TestDetail::RunTests();
+	}
+
+#ifdef _WIN32
+	WSACleanup();
+#endif
+
+	return ret;
 }
